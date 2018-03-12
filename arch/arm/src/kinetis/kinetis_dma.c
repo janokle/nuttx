@@ -131,7 +131,10 @@ static int kinetis_dmainterrupt(int irq, void *context, void *arg)
 size_t kinetis_dmaresidual(DMA_HANDLE handle)
 {
   struct kinetis_dma_ch *ch = (struct kinetis_dma_ch *)handle;
-  return getreg16(KINETIS_DMA_TCD_CITER(ch->ind)) & 0x7FFF;
+  uint16_t count;
+  count = getreg16(KINETIS_DMA_TCD_CITER(ch->ind)) & 0x7FFF;
+  asm volatile("nop");
+  return count;
 }
 
 
@@ -151,6 +154,7 @@ void weak_function up_dmainitialize(void)
   int i;
   uint32_t regval;
 
+  asm volatile("bkpt 2");
   for (i = 0; i < DMA_N_CHANNELS; i++) {
     channels[i].ind = i;
     channels[i].used = false;
@@ -348,7 +352,6 @@ int kinetis_dmastart(DMA_HANDLE handle, dma_callback_t callback, void *arg)
 
   // Enable request register for this channel
   putreg8(ch->ind, KINETIS_DMA_SERQ);
-
 
   // todo: enble also error interrupt register? (seei)?
   // todo: set ssrt? (24.3.10)?
