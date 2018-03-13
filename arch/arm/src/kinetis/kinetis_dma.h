@@ -222,6 +222,9 @@ int kinetis_dmastart(DMA_HANDLE handle, dma_callback_t callback, void *arg);
 
 void kinetis_dmastop(DMA_HANDLE handle);
 
+
+size_t kinetis_dmaresidual(DMA_HANDLE handle);
+
 /****************************************************************************
  * Name: kinetis_dmasample
  *
