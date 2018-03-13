@@ -280,7 +280,6 @@ struct up_dev_s
 /* RX DMA state */
 #ifdef SERIAL_HAVE_DMA
   DMA_HANDLE        rxdma;     /* currently-open receive DMA stream */
-  bool              rxenable;  /* DMA-based reception en/disable */
   uint32_t          rxdmanext; /* Next byte in the DMA buffer to be read */
   char      *const  rxfifo;    /* Receive DMA buffer */
 #endif
@@ -319,7 +318,6 @@ static int  up_dma_nextrx(struct up_dev_s *priv);
 static int  up_dma_setup(struct uart_dev_s *dev);
 static void up_dma_shutdown(struct uart_dev_s *dev);
 static int  up_dma_receive(struct uart_dev_s *dev, unsigned int *status);
-static void up_dma_rxint(struct uart_dev_s *dev, bool enable);
 static bool up_dma_rxavailable(struct uart_dev_s *dev);
 
 static void up_dma_rxcallback(DMA_HANDLE handle, void *arg, int result);
@@ -361,7 +359,7 @@ static const struct uart_ops_s g_uart_dma_ops =
   .detach         = up_detach,
   .ioctl          = up_ioctl,
   .receive        = up_dma_receive,
-  .rxint          = up_dma_rxint,
+  .rxint          = up_rxint,
   .rxavailable    = up_dma_rxavailable,
 #ifdef CONFIG_SERIAL_IFLOWCONTROL
   .rxflowcontrol  = up_rxflowcontrol,
@@ -912,12 +910,6 @@ static int up_dma_setup(struct uart_dev_s *dev)
   regval = getreg8(priv->uartbase + KINETIS_UART_C5_OFFSET);
   regval |= UART_C5_RDMAS;
   putreg8(regval, priv->uartbase + KINETIS_UART_C5_OFFSET);
-
-  regval = getreg8(priv->uartbase + KINETIS_UART_C2_OFFSET);
-  regval |= UART_C2_RIE;
-  putreg8(regval, priv->uartbase + KINETIS_UART_C2_OFFSET);
-
-  // todo move this to up_dma_rxint?
 
   /* Start the DMA channel, and arrange for callbacks at the half and
    * full points in the FIFO.  This ensures that we have half a FIFO
@@ -1565,31 +1557,6 @@ static void up_rxint(struct uart_dev_s *dev, bool enable)
 }
 
 /****************************************************************************
- * Name: up_dma_rxint
- *
- * Description:
- *   Call to enable or disable RX interrupts
- *
- ****************************************************************************/
-
-#ifdef SERIAL_HAVE_DMA
-static void up_dma_rxint(struct uart_dev_s *dev, bool enable)
-{
-  struct up_dev_s *priv = (struct up_dev_s *)dev->priv;
-
-  /* En/disable DMA reception.
-   *
-   * Note that it is not safe to check for available bytes and immediately
-   * pass them to uart_recvchars as that could potentially recurse back
-   * to us again.  Instead, bytes must wait until the next up_dma_poll or
-   * DMA event.
-   */
-
-  priv->rxenable = enable;
-}
-#endif
-
-/****************************************************************************
  * Name: up_rxavailable
  *
  * Description:
@@ -1850,9 +1817,8 @@ static bool up_txempty(struct uart_dev_s *dev)
 static void up_dma_rxcallback(DMA_HANDLE handle, void *arg, int result)
 {
   struct uart_dev_s *dev = (struct uart_dev_s *)arg;
-  struct up_dev_s *priv = (struct up_dev_s *)dev->priv;
 
-  if (priv->rxenable && up_dma_rxavailable(dev))
+  if (up_dma_rxavailable(dev))
     {
       uart_recvchars(dev);
     }
