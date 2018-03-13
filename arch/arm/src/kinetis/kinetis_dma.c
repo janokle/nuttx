@@ -45,6 +45,9 @@
 #include <errno.h>
 #include <debug.h>
 
+#include <nuttx/irq.h>
+#include <nuttx/arch.h>
+
 #include <arch/board/board.h>
 
 #include "up_arch.h"
@@ -55,6 +58,8 @@
 #include "kinetis_dma.h"
 #include "chip/kinetis_dmamux.h"
 #include "chip/kinetis_sim.h"
+
+
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -154,6 +159,7 @@ void weak_function up_dmainitialize(void)
 {
   int i;
   uint32_t regval;
+  int ret;
 
   asm volatile("bkpt 2");
   for (i = 0; i < DMA_N_CHANNELS; i++) {
@@ -162,8 +168,24 @@ void weak_function up_dmainitialize(void)
 
     if (i < DMA_CHN_PER_GROUP) {
       channels[i].irq = KINETIS_IRQ_FIRST + i; // todo (i % DMA_CHN_PER_GROUP);
+
+      #ifdef CONFIG_ARCH_IRQPRIO
+        /* Set up the interrupt priority */
+        up_prioritize_irq(channels[i].irq, 1);   // todo priority  --> use constant priorities, see stm32_serial.c: CONFIG_USART_DMAPRIO and also kinetis_serial.c
+      #endif
+
       /* Attach DMA interrupt */
-      (void)irq_attach(channels[i].irq, kinetis_dmainterrupt, (void *)i);
+      ret = irq_attach(channels[i].irq, kinetis_dmainterrupt, (void *)i);
+
+      if (ret == OK)
+          {
+            /* Enable the interrupt (RX and TX interrupts are still disabled
+             * in the USART
+             */
+
+            up_enable_irq(channels[i].irq);
+          }
+
     }
   }
 
@@ -315,7 +337,7 @@ int kinetis_dmasetup(DMA_HANDLE handle, uint32_t mem_addr, KINETIS_DMA_DATA_SZ m
   // regval |= config->circular ? (ch->ind | DMA_TCD_CSR_MAJORELINK) : 0;
   // Enable major half complete and major complete interrupts
   // todo regval |= config->halfcomplete_interrupt ? DMA_TCD_CSR_INTHALF : 0;
-  regval |= DMA_TCD_CSR_INTMAJOR;
+  regval |= DMA_TCD_CSR_INTMAJOR | DMA_TCD_CSR_INTHALF;  // todo
 
   putreg16(regval, KINETIS_DMA_TCD_CSR(ch->ind));
 
