@@ -873,7 +873,6 @@ static int up_dma_setup(struct uart_dev_s *dev)
   uint8_t regval;
 
   /* Do the basic UART setup first, unless we are the console */
-  asm volatile("bkpt 0");
   if (!dev->isconsole)
     {
       result = up_setup(dev);
