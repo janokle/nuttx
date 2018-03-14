@@ -69,6 +69,7 @@
 #include "chip/kinetis_pinmux.h"
 #include "kinetis.h"
 #include "kinetis_dma.h"
+#include "kinetis_uart.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -85,14 +86,6 @@
  */
 
 #if defined(HAVE_UART_DEVICE) && defined(USE_SERIALDRIVER)
-
-/* Is DMA available on any (enabled) UART? */
-#undef SERIAL_HAVE_DMA
-#if defined(CONFIG_UART0_RXDMA) || defined(CONFIG_UART1_RXDMA) || \
-    defined(CONFIG_UART2_RXDMA) || defined(CONFIG_UART3_RXDMA) || \
-    defined(CONFIG_UART4_RXDMA)  || defined(CONFIG_UART5_RXDMA)
-#  define SERIAL_HAVE_DMA 1
-#endif
 
 /* Which UART with be tty0/console and which tty1-4?  The console will always
  * be ttyS0.  If there is no console then will use the lowest numbered UART.
@@ -1924,6 +1917,63 @@ unsigned int kinetis_uart_serialinit(unsigned int first)
 #endif
   return first;
 }
+
+/****************************************************************************
+ * Name: kinetis_serial_dma_poll
+ *
+ * Description:
+ *   Checks receive DMA buffers for received bytes that have not accumulated
+ *   to the point where the DMA half/full interrupt has triggered.
+ *
+ *   This function should be called from a timer or other periodic context.
+ *
+ ****************************************************************************/
+
+#ifdef SERIAL_HAVE_DMA
+void kinetis_serial_dma_poll(void)
+{
+    irqstate_t flags;
+
+    flags = enter_critical_section();
+
+#ifdef CONFIG_USART1_RXDMA
+  if (g_uart1priv.rxdma != NULL)
+    {
+      up_dma_rxcallback(g_uart1priv.rxdma, 0, &g_uart1priv);
+    }
+#endif
+
+#ifdef CONFIG_USART2_RXDMA
+  if (g_uart2priv.rxdma != NULL)
+    {
+      up_dma_rxcallback(g_uart2priv.rxdma, 0, &g_uart2priv);
+    }
+#endif
+
+#ifdef CONFIG_USART3_RXDMA
+  if (g_uart3priv.rxdma != NULL)
+    {
+      up_dma_rxcallback(g_uart3priv.rxdma, 0, &g_uart3priv);
+    }
+#endif
+
+#ifdef CONFIG_UART4_RXDMA
+  if (g_uart4priv.rxdma != NULL)
+    {
+      up_dma_rxcallback(g_uart4priv.rxdma, 0, &g_uart4priv);
+    }
+#endif
+
+#ifdef CONFIG_UART5_RXDMA
+  if (g_uart5priv.rxdma != NULL)
+    {
+      up_dma_rxcallback(g_uart5priv.rxdma, 0, &g_uart5priv);
+    }
+#endif
+
+  leave_critical_section(flags);
+}
+#endif
 
 /****************************************************************************
  * Name: up_putc
