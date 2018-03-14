@@ -68,7 +68,7 @@
 #define DMA_N_CHANNELS 32         // Total number of channels
 #define DMA_CHN_PER_GROUP 16      // Number of channels per group
 
-#ifndef CONFIG_DMA_PRI        // todo add this to kconfig. Adapt Kconfig in general
+#ifndef CONFIG_DMA_PRI
 #  define CONFIG_DMA_PRI NVIC_SYSH_PRIORITY_DEFAULT
 #endif
 
@@ -103,8 +103,7 @@ static int kinetis_dmainterrupt_int(int irq, void *context, struct kinetis_dma_c
   // Invoke the callback
   if (ch->callback)
     {
-      int result = 0; // todo
-      ch->callback((DMA_HANDLE)&ch, ch->arg, result);
+      ch->callback((DMA_HANDLE)&ch, ch->arg, 0);
     }
 
   return OK;
@@ -114,7 +113,6 @@ static int kinetis_dmainterrupt(int irq, void *context, void *arg)
 {
   uint8_t irq_int = *(uint8_t *)arg;
   uint32_t regval;
-  asm volatile("bkpt 2");
   regval = getreg32(KINETIS_DMA_INT);
   // Channel irq_int and irq_int + DMA_CHN_PER_GROUP use the same arg. Check which one requested an interrupt
   if ((regval & (1 << irq_int)) != 0)
@@ -137,10 +135,7 @@ static int kinetis_dmainterrupt(int irq, void *context, void *arg)
 size_t kinetis_dmaresidual(DMA_HANDLE handle)
 {
   struct kinetis_dma_ch *ch = (struct kinetis_dma_ch *)handle;
-  uint16_t count;
-  count = getreg16(KINETIS_DMA_TCD_CITER(ch->ind)) & 0x7FFF;
-  asm volatile("nop");
-  return count;
+  return getreg16(KINETIS_DMA_TCD_CITER(ch->ind)) & 0x7FFF;
 }
 
 
@@ -316,6 +311,10 @@ int kinetis_dmasetup(DMA_HANDLE handle, uint32_t mem_addr, KINETIS_DMA_DATA_SZ m
   struct kinetis_dma_ch *ch = (struct kinetis_dma_ch *)handle;
   uint16_t regval = 0;
 
+  if (nbytes > 0x7FFF) {
+    return -1;
+  }
+
   DEBUGASSERT(handle != NULL);
 
   if (ch->dir == KINETIS_DMA_DIRECTION_PERIPHERAL_TO_MEMORY) {
@@ -342,10 +341,9 @@ int kinetis_dmasetup(DMA_HANDLE handle, uint32_t mem_addr, KINETIS_DMA_DATA_SZ m
 
   putreg16(regval, KINETIS_DMA_TCD_CSR(ch->ind));
 
-  regval = nbytes & 0x7FFF;
-  // todo: ensure that 0<= nbytes <= 0x7FFF!
-  putreg16(regval, KINETIS_DMA_TCD_BITER(ch->ind));
-  putreg16(regval, KINETIS_DMA_TCD_CITER(ch->ind));
+  // Set major loop count
+  putreg16(nbytes, KINETIS_DMA_TCD_BITER(ch->ind));
+  putreg16(nbytes, KINETIS_DMA_TCD_CITER(ch->ind));
 
   // Set minor loop count
   putreg32(1, KINETIS_DMA_TCD_NBYTES(ch->ind));
@@ -373,7 +371,6 @@ int kinetis_dmastart(DMA_HANDLE handle, dma_callback_t callback, void *arg)
   // Enable request register for this channel
   putreg8(ch->ind, KINETIS_DMA_SERQ);
 
-  // todo: enble also error interrupt register? (seei)?
   return OK;
 }
 

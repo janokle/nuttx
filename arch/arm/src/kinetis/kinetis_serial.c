@@ -60,6 +60,7 @@
 #include <arch/serial.h>
 #include <arch/board/board.h>
 
+#include "cache.h"
 #include "up_arch.h"
 #include "up_internal.h"
 
@@ -232,6 +233,28 @@
 #  define UART5_ASSIGNED      1
 #endif
 
+/* The DMA buffer size when using RX DMA to emulate a FIFO.
+ *
+ * When streaming data, the generic serial layer will be called every time
+ * the FIFO receives half this number of bytes.
+ *
+ * This buffer size should be an even multiple of the Cortex-M7 D-Cache line
+ * size, ARMV7M_DCACHE_LINESIZE, so that it can be individually invalidated.
+ *
+ * Should there be a Cortex-M7 without a D-Cache, ARMV7M_DCACHE_LINESIZE
+ * would be zero!
+ */
+
+#  if !defined(ARMV7M_DCACHE_LINESIZE) || ARMV7M_DCACHE_LINESIZE == 0
+#    undef ARMV7M_DCACHE_LINESIZE
+#    define ARMV7M_DCACHE_LINESIZE 32
+#  endif
+
+#  if !defined(CONFIG_STM32F7_SERIAL_RXDMA_BUFFER_SIZE) || \
+      (CONFIG_STM32F7_SERIAL_RXDMA_BUFFER_SIZE < ARMV7M_DCACHE_LINESIZE)
+#    undef CONFIG_STM32F7_SERIAL_RXDMA_BUFFER_SIZE
+#    define CONFIG_STM32F7_SERIAL_RXDMA_BUFFER_SIZE ARMV7M_DCACHE_LINESIZE
+#  endif
 
 #define RXDMA_BUFFER_SIZE 32
 
@@ -375,6 +398,7 @@ static char g_uart0rxbuffer[CONFIG_UART0_RXBUFSIZE];
 static char g_uart0txbuffer[CONFIG_UART0_TXBUFSIZE];
 # ifdef CONFIG_UART0_RXDMA
 static char g_uart0rxfifo[RXDMA_BUFFER_SIZE];
+  __attribute__((aligned(ARMV7M_DCACHE_LINESIZE)));
 # endif
 #endif
 
@@ -382,7 +406,8 @@ static char g_uart0rxfifo[RXDMA_BUFFER_SIZE];
 static char g_uart1rxbuffer[CONFIG_UART1_RXBUFSIZE];
 static char g_uart1txbuffer[CONFIG_UART1_TXBUFSIZE];
 # ifdef CONFIG_UART1_RXDMA
-static char g_uart1rxfifo[RXDMA_BUFFER_SIZE];
+static char g_uart1rxfifo[RXDMA_BUFFER_SIZE]
+  __attribute__((aligned(ARMV7M_DCACHE_LINESIZE)));
 # endif
 #endif
 
@@ -390,7 +415,8 @@ static char g_uart1rxfifo[RXDMA_BUFFER_SIZE];
 static char g_uart2rxbuffer[CONFIG_UART2_RXBUFSIZE];
 static char g_uart2txbuffer[CONFIG_UART2_TXBUFSIZE];
 # ifdef CONFIG_UART2_RXDMA
-static char g_uart2rxfifo[RXDMA_BUFFER_SIZE];
+static char g_uart2rxfifo[RXDMA_BUFFER_SIZE]
+  __attribute__((aligned(ARMV7M_DCACHE_LINESIZE)));
 # endif
 #endif
 
@@ -398,7 +424,8 @@ static char g_uart2rxfifo[RXDMA_BUFFER_SIZE];
 static char g_uart3rxbuffer[CONFIG_UART3_RXBUFSIZE];
 static char g_uart3txbuffer[CONFIG_UART3_TXBUFSIZE];
 # ifdef CONFIG_UART3_RXDMA
-static char g_uart3rxfifo[RXDMA_BUFFER_SIZE];
+static char g_uart3rxfifo[RXDMA_BUFFER_SIZE]
+  __attribute__((aligned(ARMV7M_DCACHE_LINESIZE)));
 # endif
 #endif
 
@@ -406,7 +433,8 @@ static char g_uart3rxfifo[RXDMA_BUFFER_SIZE];
 static char g_uart4rxbuffer[CONFIG_UART4_RXBUFSIZE];
 static char g_uart4txbuffer[CONFIG_UART4_TXBUFSIZE];
 # ifdef CONFIG_UART4_RXDMA
-static char g_uart4rxfifo[RXDMA_BUFFER_SIZE];
+static char g_uart4rxfifo[RXDMA_BUFFER_SIZE]
+  __attribute__((aligned(ARMV7M_DCACHE_LINESIZE)));
 # endif
 #endif
 
@@ -414,7 +442,8 @@ static char g_uart4rxfifo[RXDMA_BUFFER_SIZE];
 static char g_uart5rxbuffer[CONFIG_UART5_RXBUFSIZE];
 static char g_uart5txbuffer[CONFIG_UART5_TXBUFSIZE];
 # ifdef CONFIG_UART5_RXDMA
-static char g_uart5rxfifo[RXDMA_BUFFER_SIZE];
+static char g_uart5rxfifo[RXDMA_BUFFER_SIZE]
+  __attribute__((aligned(ARMV7M_DCACHE_LINESIZE)));
 # endif
 #endif
 
@@ -803,6 +832,29 @@ static void up_disableuartint(struct up_dev_s *priv, uint8_t *ie)
 #endif
 
 /****************************************************************************
+ * Name: get_and_clear_uart_status
+ *
+ * Description:
+ *   Clears the error flags of the uart if an error occurred in s1 and returns the status
+ *
+ * Input Parameters:
+ *   u_dev_s
+ *
+ * Returns Value:
+ *   Uart status s1
+ *
+ ****************************************************************************/
+static uint8_t get_and_clear_uart_status(struct up_dev_s *priv) {
+  uint8_t s1;
+  s1 = up_serialin(priv, KINETIS_UART_S1_OFFSET);
+  if ((s1 & 0x0F) != 0) {
+    // Clear status flag if an error occurred
+    (void)up_serialin(priv, KINETIS_UART_D_OFFSET);
+  }
+  return s1;
+}
+
+/****************************************************************************
  * Name: up_setup
  *
  * Description:
@@ -899,9 +951,9 @@ static int up_dma_setup(struct uart_dev_s *dev)
   priv->rxdmanext = 0;
 
   /* Enable receive DMA for the UART */
-  regval = getreg8(priv->uartbase + KINETIS_UART_C5_OFFSET);
+  regval = up_serialin(priv, KINETIS_UART_C5_OFFSET);
   regval |= UART_C5_RDMAS;
-  putreg8(regval, priv->uartbase + KINETIS_UART_C5_OFFSET);
+  up_serialout(priv, KINETIS_UART_C5_OFFSET, regval);
 
   /* Start the DMA channel, and arrange for callbacks at the half and
    * full points in the FIFO.  This ensures that we have half a FIFO
@@ -1488,13 +1540,27 @@ static int up_dma_receive(struct uart_dev_s *dev, unsigned int *status)
 {
   struct up_dev_s *priv = (struct up_dev_s *)dev->priv;
   int c = 0;
+  uint8_t s1;
 
   /* If additional bytes have been added to the DMA buffer, then we will need
    * to invalidate the DMA buffer before reading the byte.
    */
 
+  /* Clear uart errors and return status information */
+  s1 = get_and_clear_uart_status(priv);
+  if (status)
+    {
+      *status = (uint32_t)s1;
+    }
+
   if (up_dma_nextrx(priv) != priv->rxdmanext)
     {
+
+      /* Invalidate the DMA buffer */
+
+      arch_invalidate_dcache((uintptr_t)priv->rxfifo,
+                             (uintptr_t)priv->rxfifo + RXDMA_BUFFER_SIZE - 1);
+
       /* Now read from the DMA buffer */
       c = priv->rxfifo[priv->rxdmanext];
 
@@ -1812,7 +1878,12 @@ static void up_dma_rxcallback(DMA_HANDLE handle, void *arg, int result)
 
   if (up_dma_rxavailable(dev))
     {
+      up_send(dev, 11);
       uart_recvchars(dev);
+    }
+  else
+    {
+      (void)get_and_clear_uart_status(dev->priv);
     }
 }
 #endif
@@ -1936,38 +2007,45 @@ void kinetis_serial_dma_poll(void)
 
     flags = enter_critical_section();
 
-#ifdef CONFIG_USART1_RXDMA
+#ifdef CONFIG_UART0_RXDMA
+  if (g_uart0priv.rxdma != NULL)
+    {
+      up_dma_rxcallback(g_uart0priv.rxdma, (void *)&g_uart0port, 0);
+    }
+#endif
+
+#ifdef CONFIG_UART1_RXDMA
   if (g_uart1priv.rxdma != NULL)
     {
-      up_dma_rxcallback(g_uart1priv.rxdma, 0, &g_uart1priv);
+      up_dma_rxcallback(g_uart1priv.rxdma, (void *)&g_uart1port, 0);
     }
 #endif
 
-#ifdef CONFIG_USART2_RXDMA
+#ifdef CONFIG_UART2_RXDMA
   if (g_uart2priv.rxdma != NULL)
     {
-      up_dma_rxcallback(g_uart2priv.rxdma, 0, &g_uart2priv);
+      up_dma_rxcallback(g_uart2priv.rxdma, (void *)&g_uart2port, 0);
     }
 #endif
 
-#ifdef CONFIG_USART3_RXDMA
+#ifdef CONFIG_UART3_RXDMA
   if (g_uart3priv.rxdma != NULL)
     {
-      up_dma_rxcallback(g_uart3priv.rxdma, 0, &g_uart3priv);
+      up_dma_rxcallback(g_uart3priv.rxdma, (void *)&g_uart3port, 0);
     }
 #endif
 
 #ifdef CONFIG_UART4_RXDMA
   if (g_uart4priv.rxdma != NULL)
     {
-      up_dma_rxcallback(g_uart4priv.rxdma, 0, &g_uart4priv);
+      up_dma_rxcallback(g_uart4priv.rxdma, (void *)&g_uart4port, 0);
     }
 #endif
 
 #ifdef CONFIG_UART5_RXDMA
   if (g_uart5priv.rxdma != NULL)
     {
-      up_dma_rxcallback(g_uart5priv.rxdma, 0, &g_uart5priv);
+      up_dma_rxcallback(g_uart5priv.rxdma, (void *)&g_uart5port, 0);
     }
 #endif
 
