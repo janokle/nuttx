@@ -201,6 +201,12 @@ void kinetis_dmainitialize(void);
  *   Allocate a DMA channel.  This function sets aside a DMA channel and
  *   gives the caller exclusive access to the DMA channel.
  *
+ * Input Parameters:
+ *   src  - DMA request source
+ *   per_addr - Address of the peripheral data
+ *   per_data_sz - Peripheral data size        todo at the moment only 8bit is supported
+ *   dir - transfer direction
+ *
  * Returned Value:
  *   One success, this function returns a non-NULL, void* DMA channel
  *   handle.  NULL is returned on any failure.  This function can fail only
@@ -236,8 +242,8 @@ void kinetis_dmafree(DMA_HANDLE handle);
  *
  * Input Parameters:
  *   mem_addr  - Memory address
- *   mem_data_sz - Memory data size
- *   nbytes - Number of bytes to transfer. Must be 0<= nbytes <= 0x7FFF
+ *   mem_data_sz - Memory data size     todo at the moment only 8bit is supported
+ *   ntransfers - Number of transfers. Must be 0<= ntransfers <= 0x7FFF
  *   config - Channel configuration
  *
  * Returned Value:
@@ -245,7 +251,7 @@ void kinetis_dmafree(DMA_HANDLE handle);
  *
  ****************************************************************************/
 int kinetis_dmasetup(DMA_HANDLE handle, uint32_t mem_addr, KINETIS_DMA_DATA_SZ mem_data_sz,
-                     size_t nbytes, const kinetis_dmachannel_config *config);
+                     size_t ntransfers, const kinetis_dmachannel_config *config);
 
 
 /****************************************************************************
@@ -274,10 +280,10 @@ void kinetis_dmastop(DMA_HANDLE handle);
  * Name: kinetis_dmaresidual
  *
  * Description:
- *   Returns the number of bytes left to transfer
+ *   Returns the number of transfers left
  *
  * Returned Value:
- *   Residual bytes
+ *   Residual transfers
  ****************************************************************************/
 
 size_t kinetis_dmaresidual(DMA_HANDLE handle);

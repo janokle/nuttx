@@ -335,6 +335,9 @@ void __start(void)
 
   kinetis_fpuconfig();
   kinetis_lowsetup();
+#ifdef USE_EARLYSERIALINIT
+  kinetis_earlyserialinit();
+#endif
 
   /* For the case of the separate user-/kernel-space build, perform whatever
    * platform specific initialization of the user memory is required.

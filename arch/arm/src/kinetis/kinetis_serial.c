@@ -250,12 +250,6 @@
 #    define ARMV7M_DCACHE_LINESIZE 32
 #  endif
 
-#  if !defined(CONFIG_STM32F7_SERIAL_RXDMA_BUFFER_SIZE) || \
-      (CONFIG_STM32F7_SERIAL_RXDMA_BUFFER_SIZE < ARMV7M_DCACHE_LINESIZE)
-#    undef CONFIG_STM32F7_SERIAL_RXDMA_BUFFER_SIZE
-#    define CONFIG_STM32F7_SERIAL_RXDMA_BUFFER_SIZE ARMV7M_DCACHE_LINESIZE
-#  endif
-
 #define RXDMA_BUFFER_SIZE 32
 
 /****************************************************************************
@@ -916,6 +910,7 @@ static int up_dma_setup(struct uart_dev_s *dev)
   struct up_dev_s *priv = (struct up_dev_s *)dev->priv;
   int result;
   uint8_t regval;
+  DMA_HANDLE rxdma = NULL;
 
   /* Do the basic UART setup first, unless we are the console */
   if (!dev->isconsole)
@@ -928,12 +923,11 @@ static int up_dma_setup(struct uart_dev_s *dev)
     }
 
   /* Acquire the DMA channel.*/
-  priv->rxdma = kinetis_dmachannel(priv->rxdma_reqsrc,
-                                   priv->uartbase + KINETIS_UART_D_OFFSET,
-                                   KINETIS_DMA_DATA_SZ_8BIT,
-                                   KINETIS_DMA_DIRECTION_PERIPHERAL_TO_MEMORY);
-
-  if (priv->rxdma == NULL) {
+  rxdma = kinetis_dmachannel(priv->rxdma_reqsrc,
+                             priv->uartbase + KINETIS_UART_D_OFFSET,
+                             KINETIS_DMA_DATA_SZ_8BIT,
+                             KINETIS_DMA_DIRECTION_PERIPHERAL_TO_MEMORY);
+  if (rxdma == NULL) {
     // A DMA channel could not be acquired
     return -1;
   }
@@ -943,7 +937,7 @@ static int up_dma_setup(struct uart_dev_s *dev)
     .circular = true,
     .halfcomplete_interrupt = true
   };
-  kinetis_dmasetup(priv->rxdma, (uint32_t)priv->rxfifo, KINETIS_DMA_DATA_SZ_8BIT, RXDMA_BUFFER_SIZE, &config);
+  kinetis_dmasetup(rxdma, (uint32_t)priv->rxfifo, KINETIS_DMA_DATA_SZ_8BIT, RXDMA_BUFFER_SIZE, &config);
 
   /* Reset our DMA shadow pointer to match the address just
    * programmed above.
@@ -960,8 +954,9 @@ static int up_dma_setup(struct uart_dev_s *dev)
    * worth of time to claim bytes before they are overwritten.
    */
 
-  kinetis_dmastart(priv->rxdma, up_dma_rxcallback, (void *)dev);
+  kinetis_dmastart(rxdma, up_dma_rxcallback, (void *)dev);
 
+  priv->rxdma = rxdma;
   return OK;
 }
 #endif
@@ -1001,6 +996,8 @@ static void up_shutdown(struct uart_dev_s *dev)
 static void up_dma_shutdown(struct uart_dev_s *dev)
 {
   struct up_dev_s *priv = (struct up_dev_s *)dev->priv;
+  DMA_HANDLE rxdma = priv->rxdma;
+  priv->rxdma = NULL;
 
   /* Perform the normal UART shutdown */
 
@@ -1008,12 +1005,11 @@ static void up_dma_shutdown(struct uart_dev_s *dev)
 
   /* Stop the DMA channel */
 
-  kinetis_dmastop(priv->rxdma);
+  kinetis_dmastop(rxdma);
 
   /* Release the DMA channel */
 
-  kinetis_dmafree(priv->rxdma);
-  priv->rxdma = NULL;
+  kinetis_dmafree(rxdma);
 }
 #endif
 
@@ -1878,12 +1874,7 @@ static void up_dma_rxcallback(DMA_HANDLE handle, void *arg, int result)
 
   if (up_dma_rxavailable(dev))
     {
-      up_send(dev, 11);
       uart_recvchars(dev);
-    }
-  else
-    {
-      (void)get_and_clear_uart_status(dev->priv);
     }
 }
 #endif
