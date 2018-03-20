@@ -42,6 +42,7 @@
 
 #include <nuttx/arch.h>
 #include <nuttx/board.h>
+#include <kinetis_uart.h>
 
 #include "up_internal.h"
 
@@ -101,6 +102,7 @@ void up_idle(void)
   BEGIN_IDLE();
   asm("WFI");
   END_IDLE();
+  kinetis_serial_dma_poll();
 #endif
 }
 
